@@ -5,7 +5,7 @@ from librti_datagen.models import corrosion
 from librti_datagen.ui.shared_ui import run_tab
 
 st.set_page_config(page_title="Corrosion Data Generator", layout="wide")
-st.title("Corrosion → Dissolved Composition")
+st.title("Corrosion")
 
 seed = st.number_input("Random seed", min_value=0, max_value=2**31 - 1, value=42, step=1)
 rng = np.random.default_rng(seed)

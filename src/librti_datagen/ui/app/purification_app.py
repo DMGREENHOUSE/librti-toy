@@ -5,18 +5,13 @@ from librti_datagen.models import purification
 from librti_datagen.ui.shared_ui import run_tab
 
 st.set_page_config(page_title="Purification Data Generator", layout="wide")
-st.title("Purification → Inventory Update")
+st.title("Purification")
 
 seed = st.number_input("Random seed", min_value=0, max_value=2**31-1, value=42, step=1)
 rng = np.random.default_rng(seed)
 sampling_dim = st.radio("Auto sampling dimensionality", ["1D", "Multi-D"], horizontal=True)
 
 st.header("Purification Model")
-st.caption(
-    "Inputs → **inv_*** radionuclide inventory (e.g., inv_Fe59, inv_Cr51, inv_Ni59, inv_Mn54; optionally inv_T) "
-    "+ optional purifier geometry (bed_length_m, flow_rate_mps, porosity, surface_area_m2, temperature_c, additive_frac). "
-    "Output → updated **inv_*** after a single pass/time-step removal."
-)
 
 def pur_noise_controls():
     val = st.slider("Relative noise on updated inventory (std fraction)", 0.0, 0.5, 0.02, 0.01, key="pur_noise")

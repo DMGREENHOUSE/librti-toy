@@ -8,11 +8,15 @@ st.set_page_config(page_title="LIBRTI Data Generators", layout="wide")
 
 st.title("LIBRTI Synthetic Data Generators")
 st.write(
-    "Use these generators to create training datasets for Gaussian Process demos. "
-    "Each module supports Auto sampling (1D or Multi-D), Custom points, or uploaded inputs; "
-    "previews inputs/outputs; and downloads a single combined CSV. "
-    "After downloading, the preview collapses automatically — data persists so you can reopen it."
+    "Use these generators to create training datasets which can be subsequently downloaded."
 )
+col1, col2 = st.columns([1,2])  # two equal halves
+with col1:
+    st.image("assets/Model.png", use_container_width=True)
+with col2:
+    st.empty()  # leave blank or add text
+
+
 
 seed = st.number_input("Random seed", min_value=0, max_value=2**31 - 1, value=42, step=1)
 rng = np.random.default_rng(seed)
@@ -23,18 +27,18 @@ sampling_dim = st.radio(
     horizontal=True,
 )
 
-cor_tab, neu_tab, pur_tab = st.tabs(["Corrosion → Composition", "Neutronics + Activation", "Purification"])
+cor_tab, neu_tab, pur_tab = st.tabs(["Corrosion", "Neutronics + Activation", "Purification"])
 
 # ---------------------------
 # Corrosion: temperature (+ geometry) -> composition fractions
 # ---------------------------
 with cor_tab:
-    st.header("Corrosion → Dissolved Composition")
-    st.caption(
-        "Inputs → **temperature_c** (+ geometry: flow_rate_mps, wall_thickness_m, surface_area_m2). "
-        "Outputs → **comp_Fe, comp_Cr, comp_Ni, comp_Mn** (fractions sum to 1). "
-        "Tip: Use this tab to create composition inputs for the Neutronics + Activation tab."
-    )
+    st.header("Corrosion")
+    col1, col2 = st.columns([1,2])  # two equal halves
+    with col1:
+        st.image("assets/Corrosion.png", use_container_width=True)
+    with col2:
+        st.empty()  # leave blank or add text
 
     def cor_noise_controls():
         val = st.slider("Composition noise (Dirichlet-like)", 0.0, 0.5, 0.10, 0.01, key="cor_noise")
@@ -63,11 +67,11 @@ with cor_tab:
 # ---------------------------
 with neu_tab:
     st.header("Neutronics + Activation")
-    st.caption(
-        "Inputs → composition (**comp_Fe, comp_Cr, comp_Ni, comp_Mn**), current radionuclide inventory (**inv_***), "
-        "and parameters (**blanket_thickness_m**, **neutron_flux_e23** in ×1e23 n·m⁻²·s⁻¹, **exposure_time_s**). "
-        "Output → updated **inv_*** after activation in the exposure window."
-    )
+    col1, col2 = st.columns([1,2])  # two equal halves
+    with col1:
+        st.image("assets/Neutroact.png", use_container_width=True)
+    with col2:
+        st.empty()  # leave blank or add text
 
     def neu_noise_controls():
         act = st.slider("Activation noise (fractional std)", 0.0, 0.5, 0.10, 0.01, key="neu_act_noise")
@@ -108,12 +112,12 @@ with neu_tab:
 # Purification: inv_* (+ purifier geometry) -> updated inv_*
 # ---------------------------
 with pur_tab:
-    st.header("Purification → Inventory Update")
-    st.caption(
-        "Inputs → **inv_*** radionuclide inventory (e.g., inv_Fe59, inv_Cr51, inv_Ni59, inv_Mn54; you may also include inv_T) "
-        "+ optional purifier geometry (bed_length_m, flow_rate_mps, porosity, surface_area_m2, temperature_c, additive_frac). "
-        "Output → updated **inv_*** after a single pass/time-step removal."
-    )
+    st.header("Purification")
+    col1, col2 = st.columns([1,2])  # two equal halves
+    with col1:
+        st.image("assets/Purification.png", use_container_width=True)
+    with col2:
+        st.empty()  # leave blank or add text
 
     def pur_noise_controls():
         val = st.slider("Relative noise on updated inventory (std fraction)", 0.0, 0.5, 0.02, 0.01, key="pur_noise")
