@@ -5,25 +5,27 @@ from librti_datagen.models import corrosion
 from librti_datagen.ui.shared_ui import run_tab
 
 st.set_page_config(page_title="Corrosion Data Generator", layout="wide")
-st.title("Corrosion Data Generator")
+st.title("Corrosion → Dissolved Composition")
 
-seed = st.number_input("Random seed", min_value=0, max_value=2**31-1, value=42, step=1)
+seed = st.number_input("Random seed", min_value=0, max_value=2**31 - 1, value=42, step=1)
 rng = np.random.default_rng(seed)
 sampling_dim = st.radio("Auto sampling dimensionality", ["1D", "Multi-D"], horizontal=True)
 
 st.header("Corrosion Model")
-st.caption("Inputs → corrosion_rate_mm_per_year.")
+st.caption(
+    "Inputs → **temperature_c** (+ geometry: flow_rate_mps, wall_thickness_m, surface_area_m2). "
+    "Outputs → **comp_Fe, comp_Cr, comp_Ni, comp_Mn** (fractions sum to 1)."
+)
 
 def cor_noise_controls():
-    val = st.slider("Output noise (fraction of value)", 0.0, 0.5, 0.10, 0.01, key="cor_noise")
+    val = st.slider("Composition noise (Dirichlet-like)", 0.0, 0.5, 0.10, 0.01, key="cor_noise")
     return {"noise_pct": val}
 
 cor_ranges = {
     "temperature_c": (20.0, 600.0),
-    "pH": (0.0, 14.0),
     "flow_rate_mps": (0.0, 2.0),
-    "dissolved_oxygen_ppm": (0.0, 10.0),
-    "chloride_ppm": (0.0, 20000.0),
+    "wall_thickness_m": (0.002, 0.050),
+    "surface_area_m2": (1.0, 100.0),
 }
 
 run_tab(

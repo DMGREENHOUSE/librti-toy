@@ -1,7 +1,7 @@
 from __future__ import annotations
 import streamlit as st
 import numpy as np
-from librti_datagen.models import purification, corrosion, neutroact
+from librti_datagen.models import corrosion, neutroact, purification
 from librti_datagen.ui.shared_ui import run_tab
 
 st.set_page_config(page_title="LIBRTI Data Generators", layout="wide")
@@ -14,53 +14,39 @@ st.write(
     "After downloading, the preview collapses automatically — data persists so you can reopen it."
 )
 
-seed = st.number_input("Random seed", min_value=0, max_value=2**31-1, value=42, step=1)
+seed = st.number_input("Random seed", min_value=0, max_value=2**31 - 1, value=42, step=1)
 rng = np.random.default_rng(seed)
 
 sampling_dim = st.radio(
     "Auto sampling dimensionality (used only when 'Auto sampling' is selected per tab)",
-    ["1D", "Multi-D"], horizontal=True
+    ["1D", "Multi-D"],
+    horizontal=True,
 )
 
-pur_tab, cor_tab, neu_tab = st.tabs(["Purification", "Corrosion", "Neutronics + Activation"])
+cor_tab, neu_tab, pur_tab = st.tabs(["Corrosion → Composition", "Neutronics + Activation", "Purification"])
 
-with pur_tab:
-    st.header("Purification Model")
-    st.caption("Inputs → purification_efficiency (0–1). Toy surrogate with temperature/contact-time effects and impurity load.")
-    def pur_noise_controls():
-        val = st.slider("Output noise (absolute std)", 0.0, 0.2, 0.02, 0.01, key="pur_noise")
-        return {"noise_std": val}
-    pur_ranges = {
-        "temperature_c": (20.0, 500.0),
-        "flow_rate_mps": (0.01, 2.0),
-        "impurity_ppm": (0.0, 5000.0),
-        "additive_frac": (0.0, 1.0),
-        "bed_length_m": (0.1, 3.0),
-    }
-    run_tab(
-        label="Purification",
-        key_prefix="pur",
-        ranges=pur_ranges,
-        compute_fn=purification.compute,
-        noise_controls_fn=pur_noise_controls,
-        sampling_dim=sampling_dim,
-        rng=rng,
-        default_prefix="purification",
+# ---------------------------
+# Corrosion: temperature (+ geometry) -> composition fractions
+# ---------------------------
+with cor_tab:
+    st.header("Corrosion → Dissolved Composition")
+    st.caption(
+        "Inputs → **temperature_c** (+ geometry: flow_rate_mps, wall_thickness_m, surface_area_m2). "
+        "Outputs → **comp_Fe, comp_Cr, comp_Ni, comp_Mn** (fractions sum to 1). "
+        "Tip: Use this tab to create composition inputs for the Neutronics + Activation tab."
     )
 
-with cor_tab:
-    st.header("Corrosion Model")
-    st.caption("Inputs → corrosion_rate_mm_per_year. Toy Arrhenius-style surrogate with pH/flow/oxygen/chloride effects.")
     def cor_noise_controls():
-        val = st.slider("Output noise (fraction of value)", 0.0, 0.5, 0.10, 0.01, key="cor_noise")
+        val = st.slider("Composition noise (Dirichlet-like)", 0.0, 0.5, 0.10, 0.01, key="cor_noise")
         return {"noise_pct": val}
+
     cor_ranges = {
         "temperature_c": (20.0, 600.0),
-        "pH": (0.0, 14.0),
         "flow_rate_mps": (0.0, 2.0),
-        "dissolved_oxygen_ppm": (0.0, 10.0),
-        "chloride_ppm": (0.0, 20000.0),
+        "wall_thickness_m": (0.002, 0.050),  # 2–50 mm
+        "surface_area_m2": (1.0, 100.0),
     }
+
     run_tab(
         label="Corrosion",
         key_prefix="cor",
@@ -72,23 +58,40 @@ with cor_tab:
         default_prefix="corrosion",
     )
 
+# ---------------------------
+# Neutronics + Activation: comp_* + inv_* + geometry + irradiation -> updated inv_*
+# ---------------------------
 with neu_tab:
-    st.header("Neutronics + Activation (Outer Emulator)")
-    st.caption("Inputs → [TBR, activation_index_1y]. Toy coupled surrogate capturing broad trends without exposing spectra/cross-sections.")
+    st.header("Neutronics + Activation")
+    st.caption(
+        "Inputs → composition (**comp_Fe, comp_Cr, comp_Ni, comp_Mn**), current radionuclide inventory (**inv_***), "
+        "and parameters (**blanket_thickness_m**, **neutron_flux_e23** in ×1e23 n·m⁻²·s⁻¹, **exposure_time_s**). "
+        "Output → updated **inv_*** after activation in the exposure window."
+    )
+
     def neu_noise_controls():
-        c1, c2 = st.columns(2)
-        with c1:
-            tbr = st.slider("TBR noise (abs std)", 0.0, 0.05, 0.01, 0.005, key="neu_tbr_noise")
-        with c2:
-            act = st.slider("Activation noise (abs std)", 0.0, 0.50, 0.10, 0.05, key="neu_act_noise")
-        return {"noise_tbr": tbr, "noise_act": act}
+        act = st.slider("Activation noise (fractional std)", 0.0, 0.5, 0.10, 0.01, key="neu_act_noise")
+        return {"noise_tbr": 0.0, "noise_act": act}
+
     neu_ranges = {
-        "blanket_thickness_m": (0.2, 1.2),
-        "li6_enrichment_pct": (5.0, 90.0),
-        "multiplier_fraction": (0.0, 0.4),
-        "structural_fraction": (0.2, 0.6),
-        "coolant_temp_c": (200.0, 600.0),
+        # Composition
+        "comp_Fe": (0.0, 1.0),
+        "comp_Cr": (0.0, 1.0),
+        "comp_Ni": (0.0, 1.0),
+        "comp_Mn": (0.0, 1.0),
+
+        # Current inventory
+        "inv_Fe59": (0.0, 1e6),
+        "inv_Cr51": (0.0, 1e6),
+        "inv_Ni59": (0.0, 1e6),
+        "inv_Mn54": (0.0, 1e6),
+
+        # Geometry + irradiation (flux in 1e23 units)
+        "blanket_thickness_m": (0.1, 1.5),
+        "neutron_flux_e23": (1e-8, 5e-6),   # corresponds to ~1e15 .. 5e17 n·m⁻²·s⁻¹
+        "exposure_time_s": (1e2, 1e6),
     }
+
     run_tab(
         label="Neutronics + Activation",
         key_prefix="neu",
@@ -100,15 +103,120 @@ with neu_tab:
         default_prefix="neutroact",
     )
 
-with st.expander("Notes & Tips"):
-    st.markdown(
-        """
-        - **Synthetic only**: These formulas are illustrative for ML training. Adjust coefficients to better match your storytelling.
-        - **Input modes**:
-          - *Auto sampling*: Use 1D sweeps or uniform Multi-D sampling over ranges.
-          - *Custom points*: Manually define exact points via the in-browser table.
-          - *Upload inputs*: Provide your own input CSV to evaluate the model.
-        - **Append mode**: Upload a base dataset to append generated rows; columns must match (order-insensitive).
-        - **Persistence**: Generated datasets are kept in `st.session_state`. After download, the preview collapses; click *Reopen Preview* to expand.
-        """
+
+# ---------------------------
+# Purification: inv_* (+ purifier geometry) -> updated inv_*
+# ---------------------------
+with pur_tab:
+    st.header("Purification → Inventory Update")
+    st.caption(
+        "Inputs → **inv_*** radionuclide inventory (e.g., inv_Fe59, inv_Cr51, inv_Ni59, inv_Mn54; you may also include inv_T) "
+        "+ optional purifier geometry (bed_length_m, flow_rate_mps, porosity, surface_area_m2, temperature_c, additive_frac). "
+        "Output → updated **inv_*** after a single pass/time-step removal."
     )
+
+    def pur_noise_controls():
+        val = st.slider("Relative noise on updated inventory (std fraction)", 0.0, 0.5, 0.02, 0.01, key="pur_noise")
+        return {"noise_std": val}
+
+    pur_ranges = {
+        # Example inventory columns (extend or edit freely)
+        "inv_Fe59": (0.0, 1e6),
+        "inv_Cr51": (0.0, 1e6),
+        "inv_Ni59": (0.0, 1e6),
+        "inv_Mn54": (0.0, 1e6),
+        # Optional: keep tritium in the vector if you want to show incidental removal
+        "inv_T": (0.0, 1e6),
+
+        # Purifier geometry (optional in model; defaults used if omitted)
+        "bed_length_m": (0.1, 3.0),
+        "flow_rate_mps": (0.01, 2.0),
+        "porosity": (0.10, 0.70),
+        "surface_area_m2": (1.0, 100.0),
+        "temperature_c": (200.0, 600.0),
+        "additive_frac": (0.0, 1.0),
+    }
+
+    run_tab(
+        label="Purification",
+        key_prefix="pur",
+        ranges=pur_ranges,
+        compute_fn=purification.compute,
+        noise_controls_fn=pur_noise_controls,
+        sampling_dim=sampling_dim,
+        rng=rng,
+        default_prefix="purification",
+    )
+
+with st.expander("Parameter Details"):
+    NOTES_MD = """
+
+### Corrosion → Dissolved Composition
+
+> Produces **fractions** that sum to 1.0; use them as composition inputs for Neutronics+Activation.
+
+**Inputs**
+
+| Quantity            | Units   | Description |
+|---|---|---|
+| `temperature_c`     | °C      | Bulk fluid / wall temperature . |
+| `flow_rate_mps`     | m·s⁻¹   | Superficial velocity; tilts composition via mass transfer. |
+| `wall_thickness_m`  | m       | Sets area/thickness scaling. |
+| `surface_area_m2`   | m²      | Effective exposed area. |
+
+**Outputs**
+
+| Quantity                                 | Units | Description |
+|---|---|---|
+| `comp_Fe`, `comp_Cr`, `comp_Ni`, `comp_Mn` | – (0–1) | Composition fractions of dissolved corrosion products (row sums ≈ 1). |
+
+---
+
+### Neutronics + Activation → Inventory Update
+
+> Flux is entered as **`neutron_flux_e23` in ×10^23 n·m⁻²·s⁻¹** (i.e., Φ/1e23). The model converts back internally.  
+> Adds an activation increment over the exposure window to the provided inventories.
+
+**Inputs**
+
+| Quantity                                  | Units                         | Description |
+|---|---|---|
+| `comp_Fe`, `comp_Cr`, `comp_Ni`, `comp_Mn` | – (0–1)                      | Composition fractions (often from Corrosion output). |
+| `inv_Fe59`, `inv_Cr51`, `inv_Ni59`, `inv_Mn54`, ... | user-chosen          | Current radionuclide inventories (any `inv_*` columns present are passed through and updated). |
+| `blanket_thickness_m`                     | m                             | Effective path length (attenuation factor). |
+| `neutron_flux_e23`                        | ×10^23 n·m⁻²·s⁻¹              | Incident flux scaled by 1e23 (enter Φ/1e23). |
+| `exposure_time_s`                         | s                             | Irradiation time window. |
+
+**Outputs**
+
+| Quantity    | Units           | Description |
+|---|---|---|
+| `inv_*`     | same as input   | Updated radionuclide inventories after activation increment. |
+
+---
+### Purification → Inventory Update
+
+> The model is unit-agnostic for radionuclide inventories: whatever unit you use for `inv_*` is preserved in the output.  
+> **Recommended units:** mol·m⁻³ (concentration), Bq·m⁻³ (activity), or mol (amount).
+
+**Inputs**
+
+| Quantity           | Units (recommended)         | Description |
+|---|---|---|
+| `inv_*`            | user-chosen                 | Current radionuclide inventories (e.g., `inv_Fe59`, `inv_Cr51`, `inv_Ni59`, `inv_Mn54`, optionally `inv_T`). |
+| `bed_length_m`     | m                           | Effective bed length / contact path. |
+| `flow_rate_mps`    | m·s⁻¹                       | Superficial velocity (controls contact time). |
+| `porosity`         | – (0–1)                     | Bed porosity; performance peaks near ~0.4 in this toy model. |
+| `surface_area_m2`  | m²                          | Effective sorbent/reactive surface area. |
+| `temperature_c`    | °C                          | Operating temperature (mild acceleration with T). |
+| `additive_frac`    | – (0–1)                     | Additive fraction; boosts removal efficiency. |
+
+**Outputs**
+
+| Quantity    | Units           | Description |
+|---|---|---|
+| `inv_*`     | same as input   | Updated radionuclide inventories after a single pass/time-step removal. |
+
+---
+"""
+    st.markdown(NOTES_MD)

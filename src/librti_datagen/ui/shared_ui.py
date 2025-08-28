@@ -4,6 +4,17 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Tuple, Callable
 
+# -----------------------------
+# Branding palette
+# -----------------------------
+KEY_LIME   = "#EBF38B"
+INDIGO     = "#16425B"
+INDIGO_50  = "#8AA0AD"
+KEPPEL     = "#16D5C2"
+KEPPEL_50  = "#8AEAE1"
+BLACK      = "#000000"
+GREY_80    = "#333333"
+
 __all__ = [
     "to_csv_bytes",
     "sample_uniform",
@@ -16,6 +27,58 @@ __all__ = [
     "preview_and_download",
     "run_tab",
 ]
+
+# Try Altair for branded scatter; fall back gracefully
+try:
+    import altair as alt
+except Exception:  # pragma: no cover
+    alt = None
+
+# ---------- Brand theming ----------
+def apply_branding():
+    """Inject lightweight CSS for brand look & feel (idempotent)."""
+    if st.session_state.get("_branding_injected"):
+        return
+    BRAND_CSS = f"""
+    <style>
+      :root {{
+        --brand-primary: {INDIGO};
+        --brand-primary-50: {INDIGO_50};
+        --brand-accent: {KEPPEL};
+        --brand-accent-50: {KEPPEL_50};
+        --brand-accent-2: {KEY_LIME};
+        --brand-black: {BLACK};
+        --brand-grey-80: {GREY_80};
+      }}
+      /* Headings */
+      h1, h2, h3 {{ color: var(--brand-black); }}
+      /* Primary buttons & download buttons */
+      div.stButton > button, div.stDownloadButton > button {{
+        background-color: var(--brand-primary);
+        color: white;
+        border: 0;
+        border-radius: 12px;
+      }}
+      div.stButton > button:hover, div.stDownloadButton > button:hover {{
+        background-color: var(--brand-primary-50);
+      }}
+      /* Expander header with accent gradient */
+      div.streamlit-expanderHeader {{
+        background: linear-gradient(90deg, var(--brand-accent-50) 0%, var(--brand-accent-2) 100%);
+        color: var(--brand-black);
+        border-radius: 8px;
+      }}
+      /* Labels a tad darker for contrast */
+      label {{ color: var(--brand-grey-80); }}
+      /* Table header tint */
+      [data-testid="stTable"] thead th {{
+        background-color: var(--brand-accent-50);
+        color: var(--brand-black);
+      }}
+    </style>
+    """
+    st.markdown(BRAND_CSS, unsafe_allow_html=True)
+    st.session_state["_branding_injected"] = True
 
 # ---------- Data utilities ----------
 @st.cache_data(show_spinner=False)
@@ -40,7 +103,7 @@ def compatible_append(base_df: pd.DataFrame, new_df: pd.DataFrame):
 def one_d_controls(label: str, ranges: Dict[str, Tuple[float, float]], defaults: Dict[str, float]):
     st.subheader(f"{label} • 1D Sweep")
     var_to_vary = st.selectbox("Select variable to vary (1D sweep)", list(ranges.keys()), key=f"{label}_1d_var")
-    n = st.number_input("Number of points", 5, 10_000, 50, 1, key=f"{label}_1d_n")
+    n = st.number_input("Number of points", 1, 10_000, 10, 1, key=f"{label}_1d_n")
     with st.expander("Set ranges and fixed values"):
         new_ranges, fixed_vals = {}, {}
         for k, (a, b) in ranges.items():
@@ -119,12 +182,45 @@ def preview_and_download(key_prefix: str, default_prefix: str):
 
     if isinstance(X, pd.DataFrame) and isinstance(y, pd.DataFrame):
         collapsed = st.session_state.get(f"{key_prefix}_collapsed", False)
-        with st.expander("Preview & Download", expanded=not collapsed):
+        with st.expander("Preview, Plot & Download", expanded=not collapsed):
+            # ---- PREVIEW ----
             st.subheader("Preview: Inputs")
-            st.dataframe(X.head(50), use_container_width=True)
+            st.dataframe(X, use_container_width=True)
             st.subheader("Preview: Outputs")
-            st.dataframe(y.head(50), use_container_width=True)
+            st.dataframe(y, use_container_width=True)
 
+            # ---- PLOT (branded scatter) ----
+            st.subheader("Plot (scatter)")
+            colx, coly = st.columns(2)
+            with colx:
+                x_var = st.selectbox("X axis (input variable)", list(X.columns), key=f"{key_prefix}_plot_x")
+            with coly:
+                y_var = st.selectbox("Y axis (output variable)", list(y.columns), key=f"{key_prefix}_plot_y")
+
+            plot_df = pd.DataFrame({x_var: X[x_var].to_numpy(), y_var: y[y_var].to_numpy()})
+
+            if alt is not None:
+                chart = (
+                    alt.Chart(plot_df)
+                    .mark_circle(size=64, color=INDIGO)
+                    .encode(
+                        x=alt.X(x_var, title=x_var),
+                        y=alt.Y(y_var, title=y_var),
+                        tooltip=[x_var, y_var],
+                    )
+                    .interactive()
+                    .configure_axis(labelColor=BLACK, titleColor=BLACK, gridOpacity=0.15)
+                    .configure_view(strokeOpacity=0)
+                    .configure_title(color=BLACK)
+                    .configure(background='white')
+                )
+                st.altair_chart(chart, use_container_width=True)
+            else:
+                st.info("Altair unavailable — using Streamlit fallback plot.")
+                st.scatter_chart(plot_df, x=x_var, y=y_var, use_container_width=True)
+
+            # ---- DOWNLOAD (single combined) ----
+            st.markdown("### Download")
             target_df = appended if isinstance(appended, pd.DataFrame) else combined
             default_name = f"{default_prefix}_appended.csv" if isinstance(appended, pd.DataFrame) else f"{default_prefix}_dataset.csv"
             file_name = st.text_input("Dataset CSV filename", value=default_name, key=f"{key_prefix}_dl_name")
@@ -156,6 +252,8 @@ def run_tab(
     default_prefix: str,
 ):
     """Render one model tab end-to-end: input source, (optional) append, compute, preview, download."""
+    apply_branding()  # ensure brand CSS is injected
+
     defaults = {k: (a + b) / 2 for k, (a, b) in ranges.items()}
     noise_kwargs = noise_controls_fn()
 
@@ -175,7 +273,6 @@ def run_tab(
         if sampling_dim == "1D":
             var, n, r1, fixed = one_d_controls(label, ranges, defaults)
             if st.button(f"Generate 1D {label} Data", key=f"{label}_go_1d"):
-                # Build 1D sweep
                 X = {}
                 for k, (a, b) in r1.items():
                     if k == var:
