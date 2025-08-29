@@ -10,7 +10,7 @@ st.title("LIBRTI Synthetic Data Generators")
 st.write(
     "Use these generators to create training datasets which can be subsequently downloaded."
 )
-col1, col2 = st.columns([1,2])  # two equal halves
+col1, col2 = st.columns([1,1])  # two equal halves
 with col1:
     st.image("assets/Model.png", use_container_width=True)
 with col2:
@@ -21,12 +21,6 @@ with col2:
 seed = st.number_input("Random seed", min_value=0, max_value=2**31 - 1, value=42, step=1)
 rng = np.random.default_rng(seed)
 
-sampling_dim = st.radio(
-    "Auto sampling dimensionality (used only when 'Auto sampling' is selected per tab)",
-    ["1D", "Multi-D"],
-    horizontal=True,
-)
-
 cor_tab, neu_tab, pur_tab = st.tabs(["Corrosion", "Neutronics + Activation", "Purification"])
 
 # ---------------------------
@@ -34,7 +28,7 @@ cor_tab, neu_tab, pur_tab = st.tabs(["Corrosion", "Neutronics + Activation", "Pu
 # ---------------------------
 with cor_tab:
     st.header("Corrosion")
-    col1, col2 = st.columns([1,2])  # two equal halves
+    col1, col2 = st.columns([1,1])  # two equal halves
     with col1:
         st.image("assets/Corrosion.png", use_container_width=True)
     with col2:
@@ -57,7 +51,6 @@ with cor_tab:
         ranges=cor_ranges,
         compute_fn=corrosion.compute,
         noise_controls_fn=cor_noise_controls,
-        sampling_dim=sampling_dim,
         rng=rng,
         default_prefix="corrosion",
     )
@@ -67,7 +60,7 @@ with cor_tab:
 # ---------------------------
 with neu_tab:
     st.header("Neutronics + Activation")
-    col1, col2 = st.columns([1,2])  # two equal halves
+    col1, col2 = st.columns([1,1])  # two equal halves
     with col1:
         st.image("assets/Neutroact.png", use_container_width=True)
     with col2:
@@ -102,7 +95,6 @@ with neu_tab:
         ranges=neu_ranges,
         compute_fn=neutroact.compute,
         noise_controls_fn=neu_noise_controls,
-        sampling_dim=sampling_dim,
         rng=rng,
         default_prefix="neutroact",
     )
@@ -113,7 +105,7 @@ with neu_tab:
 # ---------------------------
 with pur_tab:
     st.header("Purification")
-    col1, col2 = st.columns([1,2])  # two equal halves
+    col1, col2 = st.columns([1,1])  # two equal halves
     with col1:
         st.image("assets/Purification.png", use_container_width=True)
     with col2:
@@ -147,7 +139,6 @@ with pur_tab:
         ranges=pur_ranges,
         compute_fn=purification.compute,
         noise_controls_fn=pur_noise_controls,
-        sampling_dim=sampling_dim,
         rng=rng,
         default_prefix="purification",
     )

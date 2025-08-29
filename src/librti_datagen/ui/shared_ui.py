@@ -19,8 +19,7 @@ __all__ = [
     "to_csv_bytes",
     "sample_uniform",
     "compatible_append",
-    "one_d_controls",
-    "multid_controls",
+    "variable_fixed_controls",
     "custom_points_editor",
     "upload_inputs",
     "append_controls",
@@ -98,6 +97,53 @@ def compatible_append(base_df: pd.DataFrame, new_df: pd.DataFrame):
     missing = [c for c in base_cols if c not in new_cols]
     extra = [c for c in new_cols if c not in base_cols]
     return False, None, f"Column mismatch. Missing: {missing}; Extra: {extra}"
+
+# ---------- Variable/Fixed unified controls ----------
+def variable_fixed_controls(
+    label: str,
+    ranges: Dict[str, Tuple[float, float]],
+    defaults: Dict[str, float],
+):
+    st.subheader(f"{label} • Select variable vs fixed per input")
+    n = st.number_input(
+        "Number of points/samples",
+        min_value=1, max_value=1000, value=10, step=1,
+        key=f"{label}_vf_n",
+        help="If exactly one variable is selected → a 1D sweep (linspace).\n"
+             "If multiple variables are selected → random uniform sampling."
+    )
+
+    with st.expander("Set variable/fixed and bounds/values", expanded=True):
+        var_flags = {}
+        var_ranges = {}
+        fixed_vals = {}
+
+        cols = st.columns(2)
+        for i, (k, (a, b)) in enumerate(ranges.items()):
+            with cols[i % 2]:
+                # 👇 Default only the first parameter to be variable
+                is_var = st.checkbox(
+                    f"{k} is variable?",
+                    value=(i == 0),
+                    key=f"{label}_{k}_is_var",
+                )
+                var_flags[k] = is_var
+                if is_var:
+                    new_a = st.number_input(f"{k} min", value=float(a), key=f"{label}_{k}_a_vf")
+                    new_b = st.number_input(f"{k} max", value=float(b), key=f"{label}_{k}_b_vf")
+                    if new_b < new_a:
+                        st.warning(f"Adjusted {k} max to be ≥ min")
+                        new_b = new_a
+                    var_ranges[k] = (new_a, new_b)
+                    fixed_vals[k] = None
+                else:
+                    c = defaults.get(k, (a + b) / 2)
+                    val = st.number_input(f"{k} (fixed)", value=float(c), key=f"{label}_{k}_fixed_vf")
+                    fixed_vals[k] = val
+                    var_ranges[k] = (a, b)  # keep original range (unused for fixed)
+
+    return int(n), var_flags, var_ranges, fixed_vals
+
 
 # ---------- UI controls ----------
 def one_d_controls(label: str, ranges: Dict[str, Tuple[float, float]], defaults: Dict[str, float]):
@@ -247,7 +293,6 @@ def run_tab(
     ranges: Dict[str, Tuple[float, float]],
     compute_fn: Callable,
     noise_controls_fn: Callable[[], dict],
-    sampling_dim: str,
     rng: np.random.Generator,
     default_prefix: str,
 ):
@@ -270,20 +315,41 @@ def run_tab(
 
     X = None
     if input_mode == "Auto sampling":
-        if sampling_dim == "1D":
-            var, n, r1, fixed = one_d_controls(label, ranges, defaults)
-            if st.button(f"Generate 1D {label} Data", key=f"{label}_go_1d"):
-                X = {}
-                for k, (a, b) in r1.items():
-                    if k == var:
-                        X[k] = np.linspace(a, b, n)
-                    else:
-                        X[k] = np.full(n, fixed[k])
-                X = pd.DataFrame(X)
+        # NEW unified controls
+        n, var_flags, var_ranges, fixed_vals = variable_fixed_controls(label, ranges, defaults)
+
+        # Decide strategy: 1 variable → 1D sweep; >1 variables → multi-D uniform
+        variable_keys = [k for k, flag in var_flags.items() if flag]
+        if len(variable_keys) == 0:
+            st.info("No variables selected — all inputs are fixed. Generating a single row.")
+            X = {k: np.array([fixed_vals[k]]) for k in ranges.keys()}
+            X = pd.DataFrame(X)
+
+        elif len(variable_keys) == 1:
+            sweep_key = variable_keys[0]
+            a, b = var_ranges[sweep_key]
+            x = np.linspace(a, b, n)
+            X = {}
+            for k in ranges.keys():
+                if k == sweep_key:
+                    X[k] = x
+                else:
+                    X[k] = np.full(n, fixed_vals[k])
+            X = pd.DataFrame(X)
+
         else:
-            n, rmd = multid_controls(label, ranges)
-            if st.button(f"Generate Multi-D {label} Data", key=f"{label}_go_md"):
-                X = sample_uniform(n, rmd, rng)
+            # Multi-D uniform sampling for variables; fixed values copied across rows
+            X = {}
+            for k in ranges.keys():
+                if var_flags[k]:
+                    a, b = var_ranges[k]
+                    X[k] = rng.uniform(a, b, size=n)
+                else:
+                    X[k] = np.full(n, fixed_vals[k])
+            X = pd.DataFrame(X)
+
+        if st.button(f"Generate {label} Data", key=f"{label}_go_vf"):
+            pass  # X already prepared
 
     elif input_mode == "Custom points":
         edited = custom_points_editor(label, ranges, defaults)
@@ -321,3 +387,4 @@ def run_tab(
         st.success(f"Generated {label} dataset.")
 
     preview_and_download(key_prefix, default_prefix)
+

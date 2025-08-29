@@ -9,7 +9,6 @@ st.title("Purification")
 
 seed = st.number_input("Random seed", min_value=0, max_value=2**31-1, value=42, step=1)
 rng = np.random.default_rng(seed)
-sampling_dim = st.radio("Auto sampling dimensionality", ["1D", "Multi-D"], horizontal=True)
 
 st.header("Purification Model")
 
@@ -38,7 +37,6 @@ run_tab(
     ranges=pur_ranges,
     compute_fn=purification.compute,
     noise_controls_fn=pur_noise_controls,
-    sampling_dim=sampling_dim,
     rng=rng,
     default_prefix="purification",
 )
