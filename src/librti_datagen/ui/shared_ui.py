@@ -3,6 +3,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 from typing import Dict, Tuple, Callable
+import math
 
 # -----------------------------
 # Branding palette
@@ -99,48 +100,37 @@ def compatible_append(base_df: pd.DataFrame, new_df: pd.DataFrame):
     return False, None, f"Column mismatch. Missing: {missing}; Extra: {extra}"
 
 # ---------- Variable/Fixed unified controls ----------
-def variable_fixed_controls(
-    label: str,
-    ranges: Dict[str, Tuple[float, float]],
-    defaults: Dict[str, float],
-):
-    st.subheader(f"{label} • Select variable vs fixed per input")
+def variable_fixed_controls(label: str, ranges: Dict[str, Tuple[float, float]], defaults: Dict[str, float]):
+    st.subheader(f"{label} • Variable/Fixed Controls")
     n = st.number_input(
-        "Number of points/samples",
-        min_value=1, max_value=1000, value=10, step=1,
-        key=f"{label}_vf_n",
-        help="If exactly one variable is selected → a 1D sweep (linspace).\n"
-             "If multiple variables are selected → random uniform sampling."
+        "Number of points (per sweep / random batch)",
+        min_value=1, max_value=100_000, value=10, step=1, key=f"{label}_vf_n"
     )
 
-    with st.expander("Set variable/fixed and bounds/values", expanded=True):
-        var_flags = {}
-        var_ranges = {}
-        fixed_vals = {}
+    var_flags: Dict[str, bool] = {}
+    var_ranges: Dict[str, Tuple[float, float]] = {}
+    fixed_vals: Dict[str, float] = {}
 
-        cols = st.columns(2)
+    with st.expander("Select variables to vary and set ranges / fixed values", expanded=True):
+        # default: first param variable, others fixed (idempotent)
         for i, (k, (a, b)) in enumerate(ranges.items()):
-            with cols[i % 2]:
-                # 👇 Default only the first parameter to be variable
-                is_var = st.checkbox(
-                    f"{k} is variable?",
-                    value=(i == 0),
-                    key=f"{label}_{k}_is_var",
-                )
-                var_flags[k] = is_var
-                if is_var:
-                    new_a = st.number_input(f"{k} min", value=float(a), key=f"{label}_{k}_a_vf")
-                    new_b = st.number_input(f"{k} max", value=float(b), key=f"{label}_{k}_b_vf")
-                    if new_b < new_a:
-                        st.warning(f"Adjusted {k} max to be ≥ min")
-                        new_b = new_a
-                    var_ranges[k] = (new_a, new_b)
-                    fixed_vals[k] = None
-                else:
-                    c = defaults.get(k, (a + b) / 2)
-                    val = st.number_input(f"{k} (fixed)", value=float(c), key=f"{label}_{k}_fixed_vf")
-                    fixed_vals[k] = val
-                    var_ranges[k] = (a, b)  # keep original range (unused for fixed)
+            cols = st.columns([1.4, 1, 1, 1])
+            var_flags[k] = cols[0].checkbox(
+                f"{k} is variable",
+                value=(i == 0) if f"{label}_{k}_is_var" not in st.session_state else None,
+                key=f"{label}_{k}_is_var"
+            )
+            if var_flags[k]:
+                new_a = cols[1].number_input(f"{k} min", value=float(a), key=f"{label}_{k}_a_vf")
+                new_b = cols[2].number_input(f"{k} max", value=float(b), key=f"{label}_{k}_b_vf")
+                if new_b < new_a:
+                    st.warning(f"Adjusted {k} max to be ≥ min")
+                    new_b = new_a
+                var_ranges[k] = (new_a, new_b)
+                cols[3].markdown("&nbsp;")  # spacer
+            else:
+                c = defaults.get(k, (a + b) / 2)
+                fixed_vals[k] = cols[3].number_input(f"{k} (fixed)", value=float(c), key=f"{label}_{k}_fixed_vf")
 
     return int(n), var_flags, var_ranges, fixed_vals
 
@@ -299,6 +289,19 @@ def preview_and_download(key_prefix: str, default_prefix: str):
             if st.button("Reopen Preview", key=f"{key_prefix}_reopen"):
                 st.session_state[f"{key_prefix}_collapsed"] = False
 
+def _make_structured_grid(ranges: Dict[str, Tuple[float, float]], steps: Dict[str, int]) -> pd.DataFrame:
+    if not ranges:
+        return pd.DataFrame({"_dummy": [0]})  # no variables selected (shouldn't happen here)
+    axes = []
+    keys = list(ranges.keys())
+    for k in keys:
+        a, b = ranges[k]
+        n = max(1, int(steps.get(k, 10)))
+        arr = np.linspace(a, b, n) if n > 1 else np.array([(a + b) / 2.0])
+        axes.append(arr)
+    grids = np.meshgrid(*axes, indexing="xy")
+    flat = [g.reshape(-1) for g in grids]
+    return pd.DataFrame({k: v for k, v in zip(keys, flat)})
 
 # ---------- Orchestrator ----------
 def run_tab(
@@ -311,8 +314,7 @@ def run_tab(
     rng: np.random.Generator,
     default_prefix: str,
 ):
-    """Render one model tab end-to-end: input source, (optional) append, compute, preview, download."""
-    apply_branding()  # ensure brand CSS is injected
+    apply_branding()
 
     defaults = {k: (a + b) / 2 for k, (a, b) in ranges.items()}
     noise_kwargs = noise_controls_fn()
@@ -330,48 +332,80 @@ def run_tab(
 
     X = None
     if input_mode == "Auto sampling":
-        # NEW unified controls
         n, var_flags, var_ranges, fixed_vals = variable_fixed_controls(label, ranges, defaults)
 
-        # Decide strategy: 1 variable → 1D sweep; >1 variables → multi-D uniform
+        sampling_type = st.selectbox(
+            "Sampling type",
+            ["Random (uniform)", "Structured grid"],
+            key=f"{label}_sampling_type"
+        )
+
         variable_keys = [k for k, flag in var_flags.items() if flag]
+
         if len(variable_keys) == 0:
-            st.info("No variables selected — all inputs are fixed. Generating a single row.")
+            st.info("No variables selected — all inputs are fixed. Generates a single row.")
             X = {k: np.array([fixed_vals[k]]) for k in ranges.keys()}
             X = pd.DataFrame(X)
 
         elif len(variable_keys) == 1:
             sweep_key = variable_keys[0]
             a, b = var_ranges[sweep_key]
-            x = np.linspace(a, b, n)
-            X = {}
+
+            if sampling_type == "Random (uniform)":
+                x = rng.uniform(a, b, size=n)
+            else:  # structured
+                x = np.linspace(a, b, n)
+
+            data = {}
             for k in ranges.keys():
                 if k == sweep_key:
-                    X[k] = x
+                    data[k] = x
                 else:
-                    X[k] = np.full(n, fixed_vals[k])
-            X = pd.DataFrame(X)
+                    data[k] = np.full(n, fixed_vals[k])
+            X = pd.DataFrame(data)
 
         else:
-            # Multi-D uniform sampling for variables; fixed values copied across rows
-            X = {}
-            for k in ranges.keys():
-                if var_flags[k]:
-                    a, b = var_ranges[k]
-                    X[k] = rng.uniform(a, b, size=n)
+            if sampling_type == "Random (uniform)":
+                data = {}
+                for k in ranges.keys():
+                    if var_flags[k]:
+                        a, b = var_ranges[k]
+                        data[k] = rng.uniform(a, b, size=n)
+                    else:
+                        data[k] = np.full(n, fixed_vals[k])
+                X = pd.DataFrame(data)
+
+            else:  # Structured grid with automatic steps
+                d = len(variable_keys)
+                steps_float = n ** (1 / d)
+                steps_int = max(2, int(round(steps_float)))  # at least 2 per variable
+
+                total_pts = steps_int ** d
+                st.caption(f"Structured grid with ~{n:,} target points → "
+                           f"{steps_int} steps per variable → {total_pts:,} total points")
+
+                if total_pts > 100_000:
+                    st.error("Structured grid too large (>100,000 points). Reduce requested points.")
+                    X = None
                 else:
-                    X[k] = np.full(n, fixed_vals[k])
-            X = pd.DataFrame(X)
+                    grid_ranges = {k: var_ranges[k] for k in variable_keys}
+                    grid_steps  = {k: steps_int for k in variable_keys}
+                    grid_df = _make_structured_grid(grid_ranges, grid_steps)
+                    # Add fixed dims back
+                    for k in ranges.keys():
+                        if not var_flags[k]:
+                            grid_df[k] = fixed_vals[k]
+                    X = grid_df[[*ranges.keys()]]
 
         if st.button(f"Generate {label} Data", key=f"{label}_go_vf"):
-            pass  # X already prepared
+            pass
 
     elif input_mode == "Custom points":
         edited = custom_points_editor(label, ranges, defaults)
         if st.button(f"Generate {label} Data from Custom Points", key=f"{label}_go_custom"):
             X = edited.copy()
 
-    else:  # Upload inputs
+    else:  # Upload
         up = upload_inputs(label, ranges)
         if st.button(f"Generate {label} Data from Uploaded Inputs", key=f"{label}_go_upload"):
             if up is None:
@@ -379,7 +413,6 @@ def run_tab(
             else:
                 X = up.copy()
 
-    # Compute and (optionally) append
     if isinstance(X, pd.DataFrame):
         y = compute_fn(X, **noise_kwargs, rng=rng)
         combined = pd.concat([X.reset_index(drop=True), y.reset_index(drop=True)], axis=1)
@@ -402,4 +435,3 @@ def run_tab(
         st.success(f"Generated {label} dataset.")
 
     preview_and_download(key_prefix, default_prefix)
-
