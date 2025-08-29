@@ -268,12 +268,26 @@ def preview_and_download(key_prefix: str, default_prefix: str):
             # ---- DOWNLOAD (single combined) ----
             st.markdown("### Download")
             target_df = appended if isinstance(appended, pd.DataFrame) else combined
-            default_name = f"{default_prefix}_appended.csv" if isinstance(appended, pd.DataFrame) else f"{default_prefix}_dataset.csv"
-            file_name = st.text_input("Dataset CSV filename", value=default_name, key=f"{key_prefix}_dl_name")
+            default_name = (
+                f"{default_prefix}_appended.csv"
+                if isinstance(appended, pd.DataFrame)
+                else f"{default_prefix}_dataset.csv"
+            )
+
+            # Text input bound to session state
+            st.text_input(
+                "Dataset CSV filename. Press Enter to set.",
+                value=default_name,
+                key=f"{key_prefix}_dl_name",
+            )
+
+            # Try to fetch the latest text value from session state
+            current_name = st.session_state.get(f"{key_prefix}_dl_name", default_name)
+
             clicked = st.download_button(
                 label="Download dataset CSV",
                 data=to_csv_bytes(target_df),
-                file_name=file_name,
+                file_name=current_name,
                 mime="text/csv",
                 key=f"{key_prefix}_dl_btn",
             )
@@ -284,6 +298,7 @@ def preview_and_download(key_prefix: str, default_prefix: str):
             st.info("Preview collapsed after download. Use the button below to reopen.")
             if st.button("Reopen Preview", key=f"{key_prefix}_reopen"):
                 st.session_state[f"{key_prefix}_collapsed"] = False
+
 
 # ---------- Orchestrator ----------
 def run_tab(
